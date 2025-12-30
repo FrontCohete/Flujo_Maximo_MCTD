@@ -3,112 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grafo Interactivo con Valores Pf</title>
-    <style>
-        :root {
-            --primary: #007bff;
-            --danger: #dc3545;
-            --dark: #343a40;
-            --success: #28a745;
-            --info: #17a2b8;
-        }
-
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            margin: 0;
-            display: flex;
-            height: 100vh;
-            background-color: #f8f9fa;
-        }
-
-        /* --- Panel Lateral --- */
-        #sidebar {
-            width: 380px;
-            background: white;
-            border-right: 1px solid #dee2e6;
-            display: flex;
-            flex-direction: column;
-            padding: 20px;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.05);
-            z-index: 20;
-            overflow-y: auto;
-        }
-
-        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-        th, td { padding: 8px; border: 1px solid #dee2e6; text-align: center; }
-        input { width: 100%; border: 1px solid #ccc; border-radius: 4px; padding: 6px; box-sizing: border-box; }
-
-        /* --- Lienzo --- */
-        #canvas { flex-grow: 1; position: relative; overflow: hidden; background-color: #ffffff; }
-        
-        #connections-svg {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none;
-            z-index: 1;
-        }
-
-        .connection-line {
-            stroke: var(--info);
-            stroke-width: 2;
-            marker-end: url(#arrowhead);
-        }
-
-        .pf-label {
-            fill: #444;
-            font-size: 14px;
-            font-weight: bold;
-            paint-order: stroke;
-            stroke: white; /* Crea un contorno blanco para legibilidad */
-            stroke-width: 3px;
-        }
-
-        /* --- Botones --- */
-        .btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .btn-add-node { background: var(--primary); color: white; width: 100%; margin-bottom: 20px; }
-        .btn-add-row { background: var(--success); color: white; margin-bottom: 10px; }
-        .btn-del-row { background: var(--danger); color: white; padding: 4px 8px; }
-
-        /* --- Nodos --- */
-        .node {
-            width: 50px; height: 50px;
-            background-color: var(--primary);
-            border: 3px solid #0056b3;
-            border-radius: 50%;
-            position: absolute;
-            cursor: grab;
-            display: flex; align-items: center; justify-content: center;
-            color: white; font-weight: bold;
-            user-select: none;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            z-index: 10;
-        }
-    </style>
+    <link rel="stylesheet" href="./source/index.css">
+    <title>Flujo Máximo</title>
 </head>
 <body>
 
     <aside id="sidebar">
-        <h3>Configuración</h3>
-        <button id="add_node" class="btn btn-add-node">+ Nuevo Nodo</button>
-        <h3>Conexiones</h3>
-        <button id="add_row" class="btn btn-add-row">+ Agregar Unión</button>
-        <table id="connections_table">
-            <thead>
-                <tr>
-                    <th>Origen</th>
-                    <th>Destino</th>
-                    <th>Pf</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+        <div class="section">
+            <h3>Nodos (Destinos)</h3>
+            <button id="add_node" class="btn btn-add-node">+ Crear Nodo</button>
+        </div>
+
+        <div class="section">
+            <h3>Conexiones (Capacidades)</h3>
+            <button id="add_row" class="btn btn-add-row">+ Nueva Unión</button>
+            <table id="connections_table">
+                <thead>
+                    <tr><th>Org</th><th>Dest</th><th>Cap (Pf)</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h3>Análisis de Rutas</h3>
+            <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                <input type="number" id="start_node" placeholder="Inicio (s)">
+                <input type="number" id="end_node" placeholder="Final (t)">
+            </div>
+            <button id="calc_routes" class="btn btn-calc">Calcular Todas las Rutas</button>
+            
+            <h4 style="margin: 15px 0 5px 0;">Rutas Encontradas:</h4>
+            <div id="results-container">Esperando... inicio - final</div>
+        </div>
     </aside>
 
     <main id="canvas">
         <svg id="connections-svg">
             <defs>
-                <marker id="arrowhead" viewBox="0 0 10 10" refX="25" refY="5" 
+                <marker id="arrowhead" viewBox="0 0 10 10" refX="22" refY="5" 
                         markerWidth="6" markerHeight="6" orient="auto">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--info)" />
                 </marker>
@@ -116,110 +49,6 @@
         </svg>
     </main>
 
-    <script>
-        const canvas = document.getElementById('canvas');
-        const svg = document.getElementById('connections-svg');
-        const tableBody = document.querySelector('#connections_table tbody');
-        const sidebar = document.getElementById('sidebar');
-        
-        let nodeCount = 0;
-        const nodes = new Map();
-
-        document.getElementById('add_node').addEventListener('click', () => {
-            nodeCount++;
-            const node = document.createElement('div');
-            node.className = 'node';
-            node.innerText = nodeCount;
-            node.style.left = '50px';
-            node.style.top = '50px';
-            node.addEventListener('mousedown', onMouseDown);
-            canvas.appendChild(node);
-            nodes.set(nodeCount, node);
-            redrawConnections();
-        });
-
-        function onMouseDown(e) {
-            const node = e.currentTarget;
-            let offsetX = e.clientX - node.getBoundingClientRect().left;
-            let offsetY = e.clientY - node.getBoundingClientRect().top;
-
-            function onMouseMove(e) {
-                const sidebarWidth = sidebar.offsetWidth;
-                let x = e.clientX - offsetX - sidebarWidth; 
-                let y = e.clientY - offsetY;
-                node.style.left = x + 'px';
-                node.style.top = y + 'px';
-                redrawConnections();
-            }
-
-            function onMouseUp() {
-                document.removeEventListener('mousemove', onMouseMove);
-                document.removeEventListener('mouseup', onMouseUp);
-            }
-
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        }
-
-        document.getElementById('add_row').addEventListener('click', () => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><input type="number" class="input-origin"></td>
-                <td><input type="number" class="input-dest"></td>
-                <td><input type="text" class="input-pf"></td>
-                <td><button class="btn btn-del-row">×</button></td>
-            `;
-            row.querySelectorAll('input').forEach(i => i.addEventListener('input', redrawConnections));
-            row.querySelector('.btn-del-row').addEventListener('click', () => { row.remove(); redrawConnections(); });
-            tableBody.appendChild(row);
-        });
-
-        function redrawConnections() {
-            // Limpiar líneas y textos anteriores
-            while (svg.lastChild && svg.lastChild.tagName !== 'defs') {
-                svg.removeChild(svg.lastChild);
-            }
-            
-            const sidebarWidth = sidebar.offsetWidth;
-
-            tableBody.querySelectorAll('tr').forEach(row => {
-                const originId = parseInt(row.querySelector('.input-origin').value);
-                const destId = parseInt(row.querySelector('.input-dest').value);
-                const pfValue = row.querySelector('.input-pf').value;
-
-                if (nodes.has(originId) && nodes.has(destId)) {
-                    const n1 = nodes.get(originId).getBoundingClientRect();
-                    const n2 = nodes.get(destId).getBoundingClientRect();
-
-                    const x1 = n1.left + n1.width/2 - sidebarWidth;
-                    const y1 = n1.top + n1.height/2;
-                    const x2 = n2.left + n2.width/2 - sidebarWidth;
-                    const y2 = n2.top + n2.height/2;
-
-                    // 1. Dibujar Línea
-                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-                    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-                    line.setAttribute('class', 'connection-line');
-                    svg.appendChild(line);
-
-                    // 2. Dibujar Valor Pf (Texto)
-                    if (pfValue !== "") {
-                        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                        // Calcular punto medio
-                        const midX = (x1 + x2) / 2;
-                        const midY = (y1 + y2) / 2;
-                        
-                        text.setAttribute('x', midX);
-                        text.setAttribute('y', midY - 10); // Un poco arriba de la línea
-                        text.setAttribute('class', 'pf-label');
-                        text.setAttribute('text-anchor', 'middle');
-                        text.textContent = pfValue;
-                        svg.appendChild(text);
-                    }
-                }
-            });
-        }
-    </script>
+    <script src="./source/app.js"></script>
 </body>
 </html>
