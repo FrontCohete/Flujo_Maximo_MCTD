@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculador de Rutas - Flujo Máximo</title>
+    <style>
+        :root {
+            --primary: #007bff;
+            --danger: #dc3545;
+            --dark: #343a40;
+            --success: #28a745;
+            --info: #17a2b8;
+            --warning: #ffc107;
+        }
+
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f8f9fa; }
+
+        /* --- Sidebar --- */
+        #sidebar {
+            width: 400px; background: white; border-right: 1px solid #dee2e6;
+            display: flex; flex-direction: column; padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 20; overflow-y: auto;
+        }
+
+        .section { margin-bottom: 25px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+        h3 { margin-top: 0; color: var(--dark); font-size: 1.1rem; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 0.85rem; }
+        th, td { padding: 6px; border: 1px solid #dee2e6; text-align: center; }
+        input { width: 100%; border: 1px solid #ccc; border-radius: 4px; padding: 5px; box-sizing: border-box; }
+
+        /* --- Resultados --- */
+        #results-container {
+            background: #f1f3f5; border-radius: 5px; padding: 10px;
+            font-family: monospace; font-size: 0.9rem; max-height: 200px; overflow-y: auto;
+        }
+        .route-item { padding: 5px; border-bottom: 1px solid #ddd; color: #333; }
+
+        /* --- Canvas --- */
+        #canvas { flex-grow: 1; position: relative; overflow: hidden; background: white; }
+        #connections-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .connection-line { stroke: var(--info); stroke-width: 2; marker-end: url(#arrowhead); }
+        .pf-label { fill: #444; font-size: 12px; font-weight: bold; paint-order: stroke; stroke: white; stroke-width: 3px; }
+
+        /* --- Botones --- */
+        .btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn:hover { opacity: 0.8; }
+        .btn-add-node { background: var(--primary); color: white; width: 100%; margin-bottom: 10px; }
+        .btn-add-row { background: var(--success); color: white; margin-bottom: 10px; width: 100%; }
+        .btn-calc { background: var(--dark); color: white; width: 100%; margin-top: 10px; }
+        .btn-del-row { background: var(--danger); color: white; padding: 2px 6px; }
+
+        .node {
+            width: 45px; height: 45px; background: var(--primary); border: 3px solid #0056b3;
+            border-radius: 50%; position: absolute; cursor: grab;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-weight: bold; z-index: 10; box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+        }
+    </style>
+</head>
+<body>
+
+    <aside id="sidebar">
+        <div class="section">
+            <h3>Nodos</h3>
+            <button id="add_node" class="btn btn-add-node">+ Crear Nodo</button>
+        </div>
+
+        <div class="section">
+            <h3>Conexiones (Capacidades)</h3>
+            <button id="add_row" class="btn btn-add-row">+ Nueva Unión</button>
+            <table id="connections_table">
+                <thead>
+                    <tr><th>Org</th><th>Dest</th><th>Cap (Pf)</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h3>Análisis de Rutas</h3>
+            <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                <input type="number" id="start_node" placeholder="Fuente (s)">
+                <input type="number" id="end_node" placeholder="Sumidero (t)">
+            </div>
+            <button id="calc_routes" class="btn btn-calc">Calcular Todas las Rutas</button>
+            
+            <h4 style="margin: 15px 0 5px 0;">Rutas Encontradas:</h4>
+            <div id="results-container">Esperando cálculo...</div>
+        </div>
+    </aside>
+
+    <main id="canvas">
+        <svg id="connections-svg">
+            <defs>
+                <marker id="arrowhead" viewBox="0 0 10 10" refX="22" refY="5" 
+                        markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--info)" />
+                </marker>
+            </defs>
+        </svg>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const svg = document.getElementById('connections-svg');
+        const tableBody = document.querySelector('#connections_table tbody');
+        const resultsContainer = document.getElementById('results-container');
+        const nodes = new Map();
+        let nodeCount = 0;
+
+        // --- GESTIÓN DE NODOS Y UI ---
+        document.getElementById('add_node').addEventListener('click', () => {
+            nodeCount++;
+            const node = document.createElement('div');
+            node.className = 'node';
+            node.innerText = nodeCount;
+            node.style.left = '50px'; node.style.top = '50px';
+            node.addEventListener('mousedown', onMouseDown);
+            canvas.appendChild(node);
+            nodes.set(nodeCount, node);
+            redrawConnections();
+        });
+
+        function onMouseDown(e) {
+            const node = e.currentTarget;
+            let offsetX = e.clientX - node.getBoundingClientRect().left;
+            let offsetY = e.clientY - node.getBoundingClientRect().top;
+            function onMouseMove(e) {
+                node.style.left = (e.clientX - offsetX - document.getElementById('sidebar').offsetWidth) + 'px';
+                node.style.top = (e.clientY - offsetY) + 'px';
+                redrawConnections();
+            }
+            function onMouseUp() {
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        }
+
+        document.getElementById('add_row').addEventListener('click', () => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><input type="number" class="input-origin"></td>
+                <td><input type="number" class="input-dest"></td>
+                <td><input type="number" class="input-pf" value="0"></td>
+                <td><button class="btn btn-del-row">×</button></td>
+            `;
+            row.querySelectorAll('input').forEach(i => i.addEventListener('input', redrawConnections));
+            row.querySelector('.btn-del-row').addEventListener('click', () => { row.remove(); redrawConnections(); });
+            tableBody.appendChild(row);
+        });
+
+        function redrawConnections() {
+            while (svg.lastChild && svg.lastChild.tagName !== 'defs') svg.removeChild(svg.lastChild);
+            const sw = document.getElementById('sidebar').offsetWidth;
+
+            tableBody.querySelectorAll('tr').forEach(row => {
+                const oId = parseInt(row.querySelector('.input-origin').value);
+                const dId = parseInt(row.querySelector('.input-dest').value);
+                const pf = row.querySelector('.input-pf').value;
+
+                if (nodes.has(oId) && nodes.has(dId)) {
+                    const r1 = nodes.get(oId).getBoundingClientRect();
+                    const r2 = nodes.get(dId).getBoundingClientRect();
+                    const x1 = r1.left + r1.width/2 - sw, y1 = r1.top + r1.height/2;
+                    const x2 = r2.left + r2.width/2 - sw, y2 = r2.top + r2.height/2;
+
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+                    line.setAttribute('class', 'connection-line');
+                    svg.appendChild(line);
+
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', (x1+x2)/2); text.setAttribute('y', (y1+y2)/2 - 10);
+                    text.setAttribute('class', 'pf-label'); text.setAttribute('text-anchor', 'middle');
+                    text.textContent = pf;
+                    svg.appendChild(text);
+                }
+            });
+        }
+
+        // --- ALGORITMO DE BÚSQUEDA DE RUTAS ---
+        document.getElementById('calc_routes').addEventListener('click', () => {
+            const start = parseInt(document.getElementById('start_node').value);
+            const end = parseInt(document.getElementById('end_node').value);
+
+            if (!nodes.has(start) || !nodes.has(end)) {
+                alert("Asegúrate de que los IDs de Fuente y Sumidero existan.");
+                return;
+            }
+
+            // Construir lista de adyacencia
+            const adj = new Map();
+            tableBody.querySelectorAll('tr').forEach(row => {
+                const u = parseInt(row.querySelector('.input-origin').value);
+                const v = parseInt(row.querySelector('.input-dest').value);
+                const cap = parseFloat(row.querySelector('.input-pf').value);
+                if (!isNaN(u) && !isNaN(v)) {
+                    if (!adj.has(u)) adj.set(u, []);
+                    adj.get(u).push({ to: v, cap: cap });
+                }
+            });
+
+            const allPaths = [];
+            findPaths(start, end, [], new Set(), allPaths, adj);
+
+            // Mostrar resultados
+            resultsContainer.innerHTML = "";
+            if (allPaths.length === 0) {
+                resultsContainer.innerHTML = "No se encontraron rutas.";
+            } else {
+                allPaths.forEach((p, i) => {
+                    const div = document.createElement('div');
+                    div.className = 'route-item';
+                    div.innerHTML = `<strong>R${i+1}:</strong> ${p.path.join('→')} <br><small>Capacidad limitante: ${p.minCap}</small>`;
+                    resultsContainer.appendChild(div);
+                });
+            }
+        });
+
+        function findPaths(current, target, path, visited, allPaths, adj) {
+            visited.add(current);
+            path.push(current);
+
+            if (current === target) {
+                // Calcular la capacidad mínima del camino (Cuello de botella)
+                let minCap = Infinity;
+                for (let i = 0; i < path.length - 1; i++) {
+                    const edges = adj.get(path[i]);
+                    const edge = edges.find(e => e.to === path[i+1]);
+                    if (edge.cap < minCap) minCap = edge.cap;
+                }
+                allPaths.push({ path: [...path], minCap: minCap });
+            } else {
+                const neighbors = adj.get(current) || [];
+                for (const edge of neighbors) {
+                    if (!visited.has(edge.to)) {
+                        findPaths(edge.to, target, path, visited, allPaths, adj);
+                    }
+                }
+            }
+
+            path.pop();
+            visited.delete(current);
+        }
+    </script>
+</body>
+</html>
